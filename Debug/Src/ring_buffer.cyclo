@@ -1,0 +1,14 @@
+../Src/ring_buffer.c:19:6:uart_start_ring_buffer	1
+../Src/ring_buffer.c:30:6:store_char	2
+../Src/ring_buffer.c:46:6:check_for	8
+../Src/ring_buffer.c:79:5:Uart_read	2
+../Src/ring_buffer.c:93:6:Uart_write	3
+../Src/ring_buffer.c:108:5:IsDataAvailable	1
+../Src/ring_buffer.c:114:6:uart_send_string	2
+../Src/ring_buffer.c:118:6:GetDataFromBuffer	10
+../Src/ring_buffer.c:175:6:Uart_flush	1
+../Src/ring_buffer.c:182:5:Uart_peek	2
+../Src/ring_buffer.c:196:5:Copy_upto	10
+../Src/ring_buffer.c:230:5:Get_after	5
+../Src/ring_buffer.c:246:5:uart_wait_for_line	13
+../Src/ring_buffer.c:299:6:uart_ring_buffer_isr	6

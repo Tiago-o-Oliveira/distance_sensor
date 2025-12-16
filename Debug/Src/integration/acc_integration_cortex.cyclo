@@ -1,0 +1,2 @@
+../Src/integration/acc_integration_cortex.c:9:6:acc_integration_critical_section_enter	1
+../Src/integration/acc_integration_cortex.c:16:6:acc_integration_critical_section_exit	1

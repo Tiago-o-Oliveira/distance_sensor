@@ -1,0 +1,9 @@
+../Src/application.c:77:5:acconeer_main	22
+../Src/application.c:296:13:cleanup	6
+../Src/application.c:331:13:set_config	5
+../Src/application.c:368:6:led_pattern_success	1
+../Src/application.c:373:6:led_pattern_fail	1
+../Src/application.c:378:9:nrf9151_setup	1
+../Src/application.c:401:6:nrf9151_connect_to_network	4
+../Src/application.c:422:7:calculate_result	2
+../Src/application.c:433:6:u64_to_str	3

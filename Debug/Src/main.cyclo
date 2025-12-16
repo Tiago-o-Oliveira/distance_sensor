@@ -1,0 +1,11 @@
+../Drivers/CMSIS/Include/core_cm4.h:1933:34:__NVIC_SystemReset	1
+../Src/main.c:94:5:main	1
+../Src/main.c:146:6:SystemClock_Config	4
+../Src/main.c:197:13:MX_I2C2_Init	4
+../Src/main.c:245:13:MX_RTC_Init	5
+../Src/main.c:328:13:MX_SPI1_Init	2
+../Src/main.c:368:13:MX_USART1_UART_Init	2
+../Src/main.c:403:13:MX_USART2_UART_Init	2
+../Src/main.c:436:13:MX_DMA_Init	1
+../Src/main.c:470:13:MX_GPIO_Init	1
+../Src/main.c:546:6:Error_Handler	0
