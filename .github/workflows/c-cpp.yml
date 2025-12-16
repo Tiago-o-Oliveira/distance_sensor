@@ -19,7 +19,7 @@ jobs:
         uses: xanderhendriks/action-build-stm32cubeide@v15.0
         with:
           project-path: '.'
-          project-target: 'stm32-auto-build-versioning-github-actions/Debug'
+          project-target: 'distance_sensor/Debug'
 
       - name: Extract Version from Commit Message
         id: extract_version
