@@ -1,67 +1,56 @@
 name: Build and Release STM32 Project
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # needed for creating releases
+      contents: write  # Required for releases
     steps:
-      # 1️⃣ Grab the latest commit message and decide if we should skip
-      - name: Determine Build Skip
-        id: skip_build
-        run: |
-          # Fetch the most recent commit message:
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-          # If it contains "--skip-build", set skip=true, else skip=false
-          if [[ "$COMMIT_MSG" =~ --skip-build ]]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-      # 2️⃣ Only build if skip=false
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Build STM32CubeIDE project
-        if: ${{ steps.skip_build.outputs.skip == 'false' }}
         uses: xanderhendriks/action-build-stm32cubeide@v15.0
         with:
           project-path: '.'
-          project-target: 'bms101v01fw/Debug'
-      # 3️⃣ Only extract version if we actually built
-      - name: Extract Version from Commit
-        if: ${{ steps.skip_build.outputs.skip == 'false' }}
+          project-target: 'stm32-auto-build-versioning-github-actions/Debug'
+
+      - name: Extract Version from Commit Message
         id: extract_version
         run: |
           COMMIT_MSG=$(git log -1 --pretty=%B)
           if [[ $COMMIT_MSG =~ (v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
             VERSION=${BASH_REMATCH[1]}
-            CLEAN=$(echo "$VERSION" | sed 's/v//; s/\.//g')
-            echo "TAG_NAME=$VERSION"     >> $GITHUB_OUTPUT
-            echo "RELEASE_NAME=bmsfw$CLEAN" >> $GITHUB_OUTPUT
+            CLEAN_VERSION=$(echo "$VERSION" | sed 's/v//; s/\.//g')
+            echo "TAG_NAME=$VERSION" >> $GITHUB_OUTPUT
+            echo "RELEASE_NAME=ledblinkfw$CLEAN_VERSION" >> $GITHUB_OUTPUT
           else
-            D=$(date +'%Y%m%d')
-            S=$(git rev-parse --short HEAD)
-            echo "TAG_NAME=auto-$D-$S"   >> $GITHUB_OUTPUT
-            echo "RELEASE_NAME=bmsfw-$D-$S" >> $GITHUB_OUTPUT
+            DATE=$(date +'%Y%m%d')
+            SHA=$(git rev-parse --short HEAD)
+            echo "TAG_NAME=autorelease-$DATE-$SHA" >> $GITHUB_OUTPUT
+            echo "RELEASE_NAME=ledblinkfw-auto-$DATE-$SHA" >> $GITHUB_OUTPUT
           fi
-      # 4️⃣ Create or update the GitHub Release
-      - name: Create GitHub Release
-        if: ${{ steps.skip_build.outputs.skip == 'false' }}
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.extract_version.outputs.TAG_NAME }}
-          name:     ${{ steps.extract_version.outputs.RELEASE_NAME }}
+          name: ${{ steps.extract_version.outputs.RELEASE_NAME }}
           files: |
-            bms101v01fw/Debug/*.bin
-            bms101v01fw/Debug/*.elf
+            Debug/*.bin
+            Debug/*.elf
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # 5️⃣ Upload the binary artifact for later retrieval
-      - name: Upload Firmware Binaries
-        if: ${{ steps.skip_build.outputs.skip == 'false' }}
+
+      - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
           name: firmware-binaries
-          path: bms101v01fw/Debug/*.bin
+          path: Debug/*.bin
