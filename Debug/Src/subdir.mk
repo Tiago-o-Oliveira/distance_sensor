@@ -7,6 +7,7 @@
 C_SRCS += \
 ../Src/application.c \
 ../Src/main.c \
+../Src/radar_fsm.c \
 ../Src/ring_buffer.c \
 ../Src/stm32l4xx_hal_msp.c \
 ../Src/stm32l4xx_it.c \
@@ -17,6 +18,7 @@ C_SRCS += \
 OBJS += \
 ./Src/application.o \
 ./Src/main.o \
+./Src/radar_fsm.o \
 ./Src/ring_buffer.o \
 ./Src/stm32l4xx_hal_msp.o \
 ./Src/stm32l4xx_it.o \
@@ -27,6 +29,7 @@ OBJS += \
 C_DEPS += \
 ./Src/application.d \
 ./Src/main.d \
+./Src/radar_fsm.d \
 ./Src/ring_buffer.d \
 ./Src/stm32l4xx_hal_msp.d \
 ./Src/stm32l4xx_it.d \
@@ -42,7 +45,7 @@ Src/%.o Src/%.su Src/%.cyclo: ../Src/%.c Src/subdir.mk
 clean: clean-Src
 
 clean-Src:
-	-$(RM) ./Src/application.cyclo ./Src/application.d ./Src/application.o ./Src/application.su ./Src/main.cyclo ./Src/main.d ./Src/main.o ./Src/main.su ./Src/ring_buffer.cyclo ./Src/ring_buffer.d ./Src/ring_buffer.o ./Src/ring_buffer.su ./Src/stm32l4xx_hal_msp.cyclo ./Src/stm32l4xx_hal_msp.d ./Src/stm32l4xx_hal_msp.o ./Src/stm32l4xx_hal_msp.su ./Src/stm32l4xx_it.cyclo ./Src/stm32l4xx_it.d ./Src/stm32l4xx_it.o ./Src/stm32l4xx_it.su ./Src/syscalls.cyclo ./Src/syscalls.d ./Src/syscalls.o ./Src/syscalls.su ./Src/sysmem.cyclo ./Src/sysmem.d ./Src/sysmem.o ./Src/sysmem.su ./Src/system_stm32l4xx.cyclo ./Src/system_stm32l4xx.d ./Src/system_stm32l4xx.o ./Src/system_stm32l4xx.su
+	-$(RM) ./Src/application.cyclo ./Src/application.d ./Src/application.o ./Src/application.su ./Src/main.cyclo ./Src/main.d ./Src/main.o ./Src/main.su ./Src/radar_fsm.cyclo ./Src/radar_fsm.d ./Src/radar_fsm.o ./Src/radar_fsm.su ./Src/ring_buffer.cyclo ./Src/ring_buffer.d ./Src/ring_buffer.o ./Src/ring_buffer.su ./Src/stm32l4xx_hal_msp.cyclo ./Src/stm32l4xx_hal_msp.d ./Src/stm32l4xx_hal_msp.o ./Src/stm32l4xx_hal_msp.su ./Src/stm32l4xx_it.cyclo ./Src/stm32l4xx_it.d ./Src/stm32l4xx_it.o ./Src/stm32l4xx_it.su ./Src/syscalls.cyclo ./Src/syscalls.d ./Src/syscalls.o ./Src/syscalls.su ./Src/sysmem.cyclo ./Src/sysmem.d ./Src/sysmem.o ./Src/sysmem.su ./Src/system_stm32l4xx.cyclo ./Src/system_stm32l4xx.d ./Src/system_stm32l4xx.o ./Src/system_stm32l4xx.su
 
 .PHONY: clean-Src
 

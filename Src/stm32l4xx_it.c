@@ -48,6 +48,10 @@ extern uint16_t timeout;
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
 extern void uart_ring_buffer_isr (UART_HandleTypeDef *huart);
+extern void ring_buffer_uart_isr (UART_HandleTypeDef *huart);
+
+extern UART_HandleTypeDef huart2;
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -328,9 +332,10 @@ void USART1_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
-  uart_ring_buffer_isr(&huart2);
+	//uart_ring_buffer_isr(&huart2);
+	ring_buffer_uart_isr(&huart2);
   /* USER CODE END USART2_IRQn 0 */
-  //HAL_UART_IRQHandler(&huart2);
+	HAL_UART_IRQHandler(&huart2);
   /* USER CODE BEGIN USART2_IRQn 1 */
 
   /* USER CODE END USART2_IRQn 1 */

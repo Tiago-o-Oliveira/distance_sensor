@@ -1,5 +1,6 @@
 #include "ring_buffer.h"
 #include <string.h>
+#include <stdbool.h>
 
 extern UART_HandleTypeDef huart2;
 
@@ -10,6 +11,7 @@ extern UART_HandleTypeDef huart2;
 uint16_t timeout;
 ring_buffer_t rx_buffer = { { 0 }, 0, 0};
 ring_buffer_t tx_buffer = { { 0 }, 0, 0};
+bool isBufferOverfloded = false;
 
 ring_buffer_t *_rx_buffer;
 ring_buffer_t *_tx_buffer;
@@ -21,7 +23,7 @@ void uart_start_ring_buffer(void){
   _tx_buffer = &tx_buffer;
 
   /* Enable the UART Error Interrupt: (Frame error, noise error, overrun error) */
-  __HAL_UART_ENABLE_IT(uart, UART_IT_ERR);
+  //__HAL_UART_ENABLE_IT(uart, UART_IT_ERR);
 
   /* Enable the UART Data Register not empty Interrupt */
   __HAL_UART_ENABLE_IT(uart, UART_IT_RXNE);
@@ -106,13 +108,14 @@ void Uart_write(int c){
 /* checks if the new data is available in the incoming buffer
  */
 int IsDataAvailable(void){
-  return (uint16_t)(UART_BUFFER_SIZE_BYTES + _rx_buffer->head - _rx_buffer->tail) % UART_BUFFER_SIZE_BYTES;
+	return (uint16_t)((_rx_buffer->head - _rx_buffer->tail) & (UART_BUFFER_SIZE_BYTES - 1));
 }
 
 /* sends the string to the uart
  */
 void uart_send_string(const char *s){
-	while(*s) Uart_write(*s++);
+	//while(*s) Uart_write(*s++);
+
 }
 
 void GetDataFromBuffer (char *startString, char *endString, char *buffertocopyfrom, char *buffertocopyinto)
@@ -253,7 +256,7 @@ again:
 	while ((!IsDataAvailable()) && timeout);  // let's wait for the data to show up
 
 	if (timeout == 0){ 
-        return 0x02;
+        return 0;
     } 
 
 	while (Uart_peek() != string[so_far]){
@@ -261,7 +264,7 @@ again:
 			_rx_buffer->tail = (unsigned int)(_rx_buffer->tail + 1) % UART_BUFFER_SIZE_BYTES;  // increment the tail
 		}
 		else{
-			return 0x01;
+			return 0;
 		}
 	}
 
@@ -272,14 +275,14 @@ again:
 		_rx_buffer->tail = (unsigned int)(_rx_buffer->tail + 1) % UART_BUFFER_SIZE_BYTES;  // increment the tail
 		
         if (so_far == len){
-            return 0x00;
+            return 1;
         }
 
 		timeout = commandTimeout;
 		while ((!IsDataAvailable())&&timeout);
 		
         if (timeout == 0) {
-            return 0x02;
+            return 0;
         }
 	
     }
@@ -289,19 +292,17 @@ again:
 		goto again;/* 0_o    o_0    0_0 */
 	}
 
-	if (so_far == len){
-		return 0x00;
-	}else{
-		return 0x01;
-	}
+	if (so_far == len) return 1;
+	else return 0;
 }
 
 void uart_ring_buffer_isr(UART_HandleTypeDef *huart){
-	  uint32_t isrflags   = READ_REG(huart->Instance->ISR);
+	   uint32_t isrflags   = READ_REG(huart->Instance->ISR);
 	  uint32_t cr1its     = READ_REG(huart->Instance->CR1);
 
     /* if DR is not empty and the Rx Int is enabled */
-	  if (((isrflags & USART_ISR_RXNE) != RESET) && ((cr1its & USART_CR1_RXNEIE) != RESET)){
+    if (((isrflags & USART_ISR_RXNE) != RESET) && ((cr1its & USART_CR1_RXNEIE) != RESET))
+    {
     	 /******************
     	    	      *  @note   PE (Parity error), FE (Framing error), NE (Noise error), ORE (Overrun
     	    	      *          error) and IDLE (Idle line detected) flags are cleared by software
@@ -313,21 +314,24 @@ void uart_ring_buffer_isr(UART_HandleTypeDef *huart){
     	    	      * @note   TXE flag is cleared only by a write to the USART_DR register.
 
     	 *********************/
-		huart->Instance->ISR;                       /* Read status register */
+    	huart->Instance->ISR;                       /* Read status register */
         unsigned char c = huart->Instance->RDR;     /* Read data register */
         store_char (c, _rx_buffer);  // store data in buffer
         return;
     }
 
     /*If interrupt is caused due to Transmit Data Register Empty */
-	 if (((isrflags & USART_ISR_TXE) != RESET) && ((cr1its & USART_CR1_TXEIE) != RESET)){
-    	if(tx_buffer.head == tx_buffer.tail){
+    if (((isrflags & USART_ISR_TXE) != RESET) && ((cr1its & USART_CR1_TXEIE) != RESET))
+    {
+    	if(tx_buffer.head == tx_buffer.tail)
+    	    {
     	      // Buffer empty, so disable interrupts
     	      __HAL_UART_DISABLE_IT(huart, UART_IT_TXE);
 
     	    }
 
-    	 else{
+    	 else
+    	    {
     	      // There is more data in the output buffer. Send the next byte
     	      unsigned char c = tx_buffer.buffer[tx_buffer.tail];
     	      tx_buffer.tail = (tx_buffer.tail + 1) % UART_BUFFER_SIZE_BYTES;
@@ -351,3 +355,125 @@ void uart_ring_buffer_isr(UART_HandleTypeDef *huart){
     	return;
     }
 }
+
+
+/** Rebuild **/
+
+
+
+
+bool ring_buffer_is_not_empty(void){
+	return (uint16_t)((_rx_buffer->head - _rx_buffer->tail) & (UART_BUFFER_SIZE_BYTES - 1));
+}
+
+static inline bool ring_buffer_get_byte(uint8_t *byteData){
+	uint16_t actualTail = _rx_buffer->tail;
+
+
+	if (actualTail == _rx_buffer->head){
+		return false;
+	}
+
+	*byteData = _rx_buffer->buffer[_rx_buffer->tail];;
+
+	_rx_buffer->tail = (uint16_t)(_rx_buffer->tail + 1u) & (UART_BUFFER_SIZE_BYTES-1);
+	return true;
+}
+
+void ring_buffer_put_byte(uint8_t byteToBuffer){
+	uint16_t nextPositiontoWrite = (uint16_t)(_rx_buffer->head + 1u) & (UART_BUFFER_SIZE_BYTES-1);
+
+	if(nextPositiontoWrite != _rx_buffer->tail){
+		_rx_buffer->buffer[_rx_buffer->head] = byteToBuffer;
+		_rx_buffer->head = nextPositiontoWrite;
+
+	}else{
+		_rx_buffer->tail = (uint16_t)(_rx_buffer->tail + 1u) & (UART_BUFFER_SIZE_BYTES-1);
+		_rx_buffer->buffer[_rx_buffer->head] = byteToBuffer;
+		_rx_buffer->head = nextPositiontoWrite;
+		isBufferOverfloded = true;// Now it's just for control purpose
+	}
+}
+
+static inline void ring_buffer_stream_matcher(uint8_t byteToTest, const uint8_t *stringToWait, uint16_t stringLength, uint16_t *bytesMatched){
+    if (stringLength == 0){
+    	*bytesMatched = 0;
+    	return;
+    }
+
+    if (byteToTest == stringToWait[*bytesMatched]) {
+        (*bytesMatched)++;
+        return;
+    }
+
+    if (byteToTest == stringToWait[0]) {
+        *bytesMatched = 1u;
+    } else {
+        *bytesMatched = 0u;
+    }
+
+}
+
+uint8_t uart_wait_for_string(const uint8_t *stringToWait, uint16_t timeout_ms){
+
+    const uint32_t start = HAL_GetTick();
+
+    uint16_t stringLength = strlen((const char *)stringToWait);
+
+    uint16_t bytesMatched = 0;
+
+    isBufferOverfloded = false;
+
+    for (;;) {
+        uint8_t byteToTest;
+
+        bool gotAnyBytes = false;
+
+        while (ring_buffer_get_byte(&byteToTest)) {
+        	gotAnyBytes = true;
+
+        	ring_buffer_stream_matcher(byteToTest, stringToWait, stringLength, &bytesMatched);
+
+            if (bytesMatched == stringLength) {
+                return true;
+            }
+        }
+
+        if (isBufferOverfloded) {
+            return false;
+        }
+
+        if ((HAL_GetTick() - start) >= timeout_ms) {
+            return false;
+        }
+
+        if (!gotAnyBytes) {
+            __WFI();
+        }
+    }
+}
+
+void ring_buffer_uart_isr(UART_HandleTypeDef *huart){
+	uint32_t uartIsrFlags = READ_REG(huart->Instance->ISR);
+	uint32_t control1Configs = READ_REG(huart->Instance->CR1);
+
+	if (uartIsrFlags & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE | USART_ISR_PE)) {
+		huart->Instance->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_PECF;
+	}
+
+
+	if (((uartIsrFlags & USART_ISR_RXNE) != RESET) && ((control1Configs & USART_CR1_RXNEIE) != RESET)){
+		huart->Instance->ISR;
+
+		uint8_t receivedByte = huart->Instance->RDR;
+		ring_buffer_put_byte(receivedByte);
+		return;
+	}
+}
+
+void ring_buffer_flush_buffer(void){
+	_rx_buffer->head = 0;
+	_rx_buffer->tail = 0;
+}
+
+

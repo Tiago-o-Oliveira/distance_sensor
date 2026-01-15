@@ -12,8 +12,8 @@
 /* Custom Variables */
 typedef struct{
     unsigned char buffer[UART_BUFFER_SIZE_BYTES];
-    volatile uint8_t head;
-    volatile uint8_t tail;
+    volatile uint16_t head;
+    volatile uint16_t tail;
 }ring_buffer_t;
 /* End of Custom Variables */
 
@@ -90,4 +90,7 @@ int uart_wait_for_line(char *string, uint16_t commandTimeout);
 void uart_ring_buffer_isr(UART_HandleTypeDef *huart);
 
 
+void ring_buffer_uart_isr (UART_HandleTypeDef *huart);
+uint8_t uart_wait_for_string(const uint8_t *stringToWait, uint16_t timeout_ms);
+void ring_buffer_flush_buffer(void);
 #endif /*RING_BUFFER_H*/

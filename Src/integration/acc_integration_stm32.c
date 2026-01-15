@@ -366,14 +366,14 @@ static void gpio_suspend(void)
 	GPIO_InitStructOff.Pin = GPIO_PIN_All;
 
 	/* Leave the following pins on bank A unchanged */
-	GPIO_InitStructOff.Pin &= (uint16_t) ~(SPI_SCK_Pin | SPI_MISO_Pin | SPI_MOSI_Pin | MISC_GPIO1_Pin);
+	//GPIO_InitStructOff.Pin &= (uint16_t) ~(SPI_SCK_Pin | SPI_MISO_Pin | SPI_MOSI_Pin | MISC_GPIO1_Pin);
 
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStructOff);
 
 	GPIO_InitStructOff.Pin = GPIO_PIN_All;
 
 	/* Leave the following pins on bank B unchanged */
-	GPIO_InitStructOff.Pin &= (uint16_t) ~(INTERRUPT_Pin | ENABLE_Pin | MISC_GPIO0_Pin);
+	//GPIO_InitStructOff.Pin &= (uint16_t) ~(INTERRUPT_Pin | ENABLE_Pin | MISC_GPIO0_Pin);
 
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStructOff);
 

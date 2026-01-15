@@ -68,18 +68,16 @@ void Error_Handler(void);
 #define WAKE_UP_EXTI_IRQn EXTI15_10_IRQn
 #define DEBUG_UART_RX_Pin GPIO_PIN_10
 #define DEBUG_UART_RX_GPIO_Port GPIOA
-#define MCU_INT_Pin GPIO_PIN_9
-#define MCU_INT_GPIO_Port GPIOB
+#define USR_BTN_Pin GPIO_PIN_8
+#define USR_BTN_GPIO_Port GPIOA
 #define DEBUG_UART_TX_Pin GPIO_PIN_9
 #define DEBUG_UART_TX_GPIO_Port GPIOA
 #define I2C_ADDRESS_Pin GPIO_PIN_0
 #define I2C_ADDRESS_GPIO_Port GPIOH
-#define I2C_SCL_Pin GPIO_PIN_10
+#define LEDG_Pin GPIO_PIN_14
+#define LEDG_GPIO_Port GPIOB
+#define I2C_SCL_Pin GPIO_PIN_13
 #define I2C_SCL_GPIO_Port GPIOB
-#define UART_RX_Pin GPIO_PIN_3
-#define UART_RX_GPIO_Port GPIOA
-#define UART_TX_Pin GPIO_PIN_2
-#define UART_TX_GPIO_Port GPIOA
 #define ENABLE_Pin GPIO_PIN_12
 #define ENABLE_GPIO_Port GPIOB
 #define I2C_SDA_Pin GPIO_PIN_11
@@ -90,12 +88,14 @@ void Error_Handler(void);
 #define SPI_MISO_GPIO_Port GPIOA
 #define SPI_SCK_Pin GPIO_PIN_5
 #define SPI_SCK_GPIO_Port GPIOA
-#define MISC_GPIO0_Pin GPIO_PIN_1
-#define MISC_GPIO0_GPIO_Port GPIOB
+#define LEDB_Pin GPIO_PIN_2
+#define LEDB_GPIO_Port GPIOB
+#define MCU_INT_Pin GPIO_PIN_1
+#define MCU_INT_GPIO_Port GPIOB
 #define SPI_SS_Pin GPIO_PIN_0
 #define SPI_SS_GPIO_Port GPIOB
-#define MISC_GPIO1_Pin GPIO_PIN_4
-#define MISC_GPIO1_GPIO_Port GPIOA
+#define LEDR_Pin GPIO_PIN_4
+#define LEDR_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

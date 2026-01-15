@@ -1,9 +1,8 @@
-../Src/application.c:77:5:acconeer_main	22
-../Src/application.c:296:13:cleanup	6
-../Src/application.c:331:13:set_config	5
-../Src/application.c:368:6:led_pattern_success	1
-../Src/application.c:373:6:led_pattern_fail	1
-../Src/application.c:378:9:nrf9151_setup	1
-../Src/application.c:401:6:nrf9151_connect_to_network	4
-../Src/application.c:422:7:calculate_result	2
-../Src/application.c:433:6:u64_to_str	3
+../Src/application.c:90:16:a121_config_and_calibrate	16
+../Src/application.c:222:16:a121_measure	7
+../Src/application.c:283:5:acconeer_main	2
+../Src/application.c:343:13:cleanup	6
+../Src/application.c:372:13:set_config	5
+../Src/application.c:410:9:nrf9151_setup	2
+../Src/application.c:453:7:calculate_result	2
+../Src/application.c:465:6:u64_to_str	3

@@ -1,14 +1,7 @@
-// Copyright (c) Acconeer AB, 2023-2024
-// All rights reserved
-// This file is subject to the terms and conditions defined in the file
-// 'LICENSES/license_acconeer.txt', (BSD 3-Clause License) which is part
-// of this source code package.
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
 
 #include "acc_definitions_a121.h"
 #include "acc_definitions_common.h"
@@ -19,7 +12,6 @@
 #include "acc_integration_log.h"
 #include "acc_rss_a121.h"
 #include "acc_sensor.h"
-
 #include "acc_version.h"
 
 #include "ring_buffer.h"
@@ -46,19 +38,48 @@
  *   - Destroy the sensor instance
  */
 
+/** Typedef **/
 typedef enum{
 	DISTANCE_PRESET_CONFIG_NONE = 0,
 	DISTANCE_PRESET_CONFIG_BALANCED,
 	DISTANCE_PRESET_CONFIG_HIGH_ACCURACY,
 } distance_preset_config_t;
 
+typedef struct{
+	acc_detector_distance_config_t   *distance_config;
+	acc_detector_distance_handle_t   *distance_handle;
+	acc_sensor_t                     *sensor;
+	void                             *buffer;
+	uint8_t                          *detector_cal_result_static;
+	uint32_t                          buffer_size;
+	uint32_t                          detector_cal_result_static_size;
+	acc_detector_cal_result_dynamic_t detector_cal_result_dynamic;
+	acc_cal_result_t                  sensor_cal_result;
+} a121_sensor_t;
+
+typedef enum{
+	STATE_MEASURE = 0x00,
+	STATE_TEST_AT,
+	STATE_SETUP_CONNECTION,
+	STATE_CONNECT,
+	STATE_MQTT_CONNECT,
+	STATE_SEND_DATA,
+	STATE_RECEIVE_CONFIG,
+	STATE_TURN_OFF,
+	STATE_TEST_RADAR,
+	STATE_TEST_MODEM,
+} sensor_states_t;
+
+/** Definitions **/
 #define SENSOR_ID           (1U)
 #define SENSOR_TIMEOUT_MS   (1000U)
 #define DEFAULT_UPDATE_RATE (1.0f)
 #define FIRMWARE_VERSION 0x01
 
-extern UART_HandleTypeDef huart1;
-
+/** Globals **/
+extern UART_HandleTypeDef huart2;
+static uint8_t state = STATE_MEASURE;
+/** Prototypes **/
 static void cleanup(acc_detector_distance_handle_t *distance_handle,
                     acc_detector_distance_config_t *distance_config,
                     acc_sensor_t                   *sensor,
@@ -66,26 +87,27 @@ static void cleanup(acc_detector_distance_handle_t *distance_handle,
                     uint8_t                        *detector_cal_result_static);
 
 static void set_config(acc_detector_distance_config_t *detector_config, distance_preset_config_t preset);
-
 int acconeer_main(int argc, char *argv[]);
-void led_pattern_success(void);
-void led_pattern_fail(void);
+
 uint8_t nrf9151_setup(void);
 float calculate_result(acc_detector_distance_result_t *result);
 void u64_to_str(uint64_t val, char *buf);
 
-int acconeer_main(int argc, char *argv[]){
-	(void)argc;
-	(void)argv;
-	acc_detector_distance_config_t   *distance_config                 = NULL;
-	acc_detector_distance_handle_t   *distance_handle                 = NULL;
-	acc_sensor_t                     *sensor                          = NULL;
-	void                             *buffer                          = NULL;
-	uint8_t                          *detector_cal_result_static      = NULL;
-	uint32_t                          buffer_size                     = 0U;
-	uint32_t                          detector_cal_result_static_size = 0U;
-	acc_detector_cal_result_dynamic_t detector_cal_result_dynamic     = {0};
+static uint8_t a121_config_and_calibrate(a121_sensor_t *a121Sensor);
+static uint8_t a121_measure(a121_sensor_t *a121Sensor,acc_detector_distance_result_t *result);
+/** Functions **/
 
+
+
+static uint8_t a121_config_and_calibrate(a121_sensor_t *a121Sensor){
+	a121Sensor->distance_config                 = NULL;
+	a121Sensor->distance_handle                 = NULL;
+	a121Sensor->sensor                          = NULL;
+	a121Sensor->buffer                          = NULL;
+	a121Sensor->detector_cal_result_static      = NULL;
+	a121Sensor->buffer_size                     = 0U;
+	a121Sensor->detector_cal_result_static_size = 0U;
+	a121Sensor->detector_cal_result_dynamic     = (acc_detector_cal_result_dynamic_t){0};
 
 	const acc_hal_a121_t *hal = acc_hal_rss_integration_get_implementation();
 
@@ -93,54 +115,55 @@ int acconeer_main(int argc, char *argv[]){
 		return EXIT_FAILURE;
 	}
 
-	distance_config = acc_detector_distance_config_create();
+	a121Sensor->distance_config = acc_detector_distance_config_create();
 
-	if (distance_config == NULL){
+	if (a121Sensor->distance_config == NULL){
 		printf("acc_detector_distance_config_create() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
-	set_config(distance_config, DISTANCE_PRESET_CONFIG_BALANCED);
+	set_config(a121Sensor->distance_config, DISTANCE_PRESET_CONFIG_BALANCED);
 
 	uint32_t sleep_time_ms = (uint32_t)(300000.0f / DEFAULT_UPDATE_RATE);
 
 	acc_integration_set_periodic_wakeup(sleep_time_ms);
 
-	distance_handle = acc_detector_distance_create(distance_config);
-	if (distance_handle == NULL){
+	a121Sensor->distance_handle = acc_detector_distance_create(a121Sensor->distance_config);
+
+	if (a121Sensor->distance_handle == NULL){
 		printf("acc_detector_distance_create() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
-	if (!acc_detector_distance_get_sizes(distance_handle, &buffer_size, &detector_cal_result_static_size)){
+	if (!acc_detector_distance_get_sizes(a121Sensor->distance_handle, &a121Sensor->buffer_size, &a121Sensor->detector_cal_result_static_size)){
 		printf("acc_detector_distance_get_buffer_size() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
-	buffer = acc_integration_mem_alloc(buffer_size);
-	if (buffer == NULL){
+	a121Sensor->buffer = acc_integration_mem_alloc(a121Sensor->buffer_size);
+	if (a121Sensor->buffer == NULL){
 		printf("buffer allocation failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
-	detector_cal_result_static = acc_integration_mem_alloc(detector_cal_result_static_size);
-	if (detector_cal_result_static == NULL){
+	a121Sensor->detector_cal_result_static = acc_integration_mem_alloc(a121Sensor->detector_cal_result_static_size);
+	if (a121Sensor->detector_cal_result_static == NULL){
 		printf("buffer allocation failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
 	acc_hal_integration_sensor_supply_on(SENSOR_ID);
 	acc_hal_integration_sensor_enable(SENSOR_ID);
 
-	sensor = acc_sensor_create(SENSOR_ID);
-	if (sensor == NULL){
+	a121Sensor->sensor = acc_sensor_create(SENSOR_ID);
+	if (a121Sensor->sensor == NULL){
 		printf("acc_sensor_create() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
@@ -150,7 +173,7 @@ int acconeer_main(int argc, char *argv[]){
 	acc_cal_result_t sensor_cal_result;
 
 	do{
-		status = acc_sensor_calibrate(sensor, &cal_complete, &sensor_cal_result, buffer, buffer_size);
+		status = acc_sensor_calibrate(a121Sensor->sensor, &cal_complete, &sensor_cal_result, a121Sensor->buffer, a121Sensor->buffer_size);
 
 		if (cal_complete){
 			break;
@@ -163,7 +186,7 @@ int acconeer_main(int argc, char *argv[]){
 
 	if (!status){
 		printf("acc_sensor_calibrate() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
@@ -175,14 +198,14 @@ int acconeer_main(int argc, char *argv[]){
 	bool done = false;
 
 	do{
-		status = acc_detector_distance_calibrate(sensor,
-		                                         distance_handle,
+		status = acc_detector_distance_calibrate(a121Sensor->sensor,
+		                                         a121Sensor->distance_handle,
 		                                         &sensor_cal_result,
-		                                         buffer,
-		                                         buffer_size,
-		                                         detector_cal_result_static,
-		                                         detector_cal_result_static_size,
-		                                         &detector_cal_result_dynamic,
+		                                         a121Sensor->buffer,
+		                                         a121Sensor->buffer_size,
+		                                         a121Sensor->detector_cal_result_static,
+		                                         a121Sensor->detector_cal_result_static_size,
+		                                         &a121Sensor->detector_cal_result_dynamic,
 		                                         &done);
 
 		if (done){
@@ -196,140 +219,196 @@ int acconeer_main(int argc, char *argv[]){
 
 	if (!status){
 		printf("acc_detector_distance_calibrate() failed\n");
-		cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+		cleanup(a121Sensor->distance_handle, a121Sensor->distance_config, a121Sensor->sensor, a121Sensor->buffer, a121Sensor->detector_cal_result_static);
 		return EXIT_FAILURE;
 	}
 
 	acc_hal_integration_sensor_disable(SENSOR_ID);
 
+	/* Preserve variable name and value exactly as used later */
+	a121Sensor->sensor_cal_result = sensor_cal_result;
+
+	return EXIT_SUCCESS;
+}
+
+static uint8_t a121_measure(a121_sensor_t *a121Sensor, acc_detector_distance_result_t *result){
+
+	acc_hal_integration_sensor_enable(SENSOR_ID);
+
+	bool result_available = false;
+
+	do {
+		if (!acc_detector_distance_prepare(a121Sensor->distance_handle,
+				a121Sensor->distance_config, a121Sensor->sensor,
+				&a121Sensor->sensor_cal_result, a121Sensor->buffer,
+				a121Sensor->buffer_size)) {
+			printf("acc_detector_distance_prepare() failed\n");
+			cleanup(a121Sensor->distance_handle, a121Sensor->distance_config,
+					a121Sensor->sensor, a121Sensor->buffer,
+					a121Sensor->detector_cal_result_static);
+			return EXIT_FAILURE;
+		}
+
+		if (!acc_sensor_measure(a121Sensor->sensor)) {
+			printf("acc_sensor_measure failed\n");
+			cleanup(a121Sensor->distance_handle, a121Sensor->distance_config,
+					a121Sensor->sensor, a121Sensor->buffer,
+					a121Sensor->detector_cal_result_static);
+			return EXIT_FAILURE;
+		}
+
+		if (!acc_hal_integration_wait_for_sensor_interrupt(SENSOR_ID,
+				SENSOR_TIMEOUT_MS)) {
+			printf("Sensor interrupt timeout\n");
+			cleanup(a121Sensor->distance_handle, a121Sensor->distance_config,
+					a121Sensor->sensor, a121Sensor->buffer,
+					a121Sensor->detector_cal_result_static);
+			return EXIT_FAILURE;
+		}
+
+		if (!acc_sensor_read(a121Sensor->sensor, a121Sensor->buffer,
+				a121Sensor->buffer_size)) {
+			printf("acc_sensor_read failed\n");
+			cleanup(a121Sensor->distance_handle, a121Sensor->distance_config,
+					a121Sensor->sensor, a121Sensor->buffer,
+					a121Sensor->detector_cal_result_static);
+			return EXIT_FAILURE;
+		}
+
+		if (!acc_detector_distance_process(a121Sensor->distance_handle,
+				a121Sensor->buffer, a121Sensor->detector_cal_result_static,
+				&a121Sensor->detector_cal_result_dynamic, &result_available,
+				result)) {
+			printf("acc_detector_distance_process failed\n");
+			cleanup(a121Sensor->distance_handle, a121Sensor->distance_config,
+					a121Sensor->sensor, a121Sensor->buffer,
+					a121Sensor->detector_cal_result_static);
+			return EXIT_FAILURE;
+		}
+	} while (!result_available);
+	acc_hal_integration_sensor_disable(SENSOR_ID);
+
+	return EXIT_SUCCESS;
+}
+
+
+int acconeer_main(int argc, char *argv[]){
+	(void)argc;
+	(void)argv;
+
+	a121_sensor_t a121Sensor;
+	acc_detector_distance_result_t result;
+
+
+	if (a121_config_and_calibrate(&a121Sensor) != EXIT_SUCCESS){
+		return EXIT_FAILURE;
+	}
+
 	while (true){
-		acc_detector_distance_result_t result;
 
-		acc_hal_integration_sensor_enable(SENSOR_ID);
+		switch (state){
+			case STATE_MEASURE:
 
-		bool result_available = false;
+				break;
+			case STATE_TEST_AT:
 
-		do{
-			if (!acc_detector_distance_prepare(distance_handle, distance_config, sensor, &sensor_cal_result, buffer, buffer_size)){
-				printf("acc_detector_distance_prepare() failed\n");
-				cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
-				return EXIT_FAILURE;
-			}
+				break;
 
-			if (!acc_sensor_measure(sensor)){
-				printf("acc_sensor_measure failed\n");
-				cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
-				return EXIT_FAILURE;
-			}
+		}
 
-			if (!acc_hal_integration_wait_for_sensor_interrupt(SENSOR_ID, SENSOR_TIMEOUT_MS)){
-				printf("Sensor interrupt timeout\n");
-				cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
-				return EXIT_FAILURE;
-			}
 
-			if (!acc_sensor_read(sensor, buffer, buffer_size)){
-				printf("acc_sensor_read failed\n");
-				cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
-				return EXIT_FAILURE;
-			}
 
-			if (!acc_detector_distance_process(distance_handle,
-			                                   buffer,
-			                                   detector_cal_result_static,
-			                                   &detector_cal_result_dynamic,
-			                                   &result_available,
-			                                   &result)){
-				printf("acc_detector_distance_process failed\n");
-				cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
-				return EXIT_FAILURE;
-			}
-		} while (!result_available);
+
+
+
+
+
 
 		char str[30];
 		char command[256];
 
-		acc_hal_integration_sensor_disable(SENSOR_ID);
 		nrf9151_setup();
-		uart_send_string("AT+CFUN=1\r\n");
 
+
+		ring_buffer_flush_buffer();
+		uint8_t Command[] = "AT%XVBAT";
+				HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,
+						sizeof(Command) - 1);
+				HAL_Delay(1000);
+				uart_wait_for_string((const uint8_t *)"%XVBAT:",1000);
+
+
+		uint8_t Command1[] = "AT+CFUN=1\r\n";
+		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command1,
+				sizeof(Command1) - 1);
 		HAL_Delay(60000);
 		//while (!(uart_wait_for_line("CEREG: 1",60000)));
 
-
-
-		uart_send_string("AT#XMQTTCON=1,\"ecomfort-gateway\",\"ecomfort*2018\",\"devmqtt.ecomfort.com.br\",1883\r\n");
-
+		uint8_t Command2[] = "AT#XMQTTCON=1,\"ecomfort-gateway\",\"ecomfort*2018\",\"devmqtt.ecomfort.com.br\",1883\r\n";
+		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command2,
+				sizeof(Command2) - 1);
 		HAL_Delay(60000);
 
-		uint16_t distance_result = (uint16_t )calculate_result(&result);
+		uint16_t distance_result = (uint16_t) calculate_result(&result);
 
-		uint64_t data = (0x06A000F000010000 | distance_result);
-		data |= ((uint64_t)(result.temperature & 0xFF)) << 40;
-
+		uint64_t data = (0x06A0000300010000 | distance_result);
+		data |= ((uint64_t) (result.temperature & 0xFF)) << 40;
 
 		u64_to_str(data, str);
 
+		//HAL_UART_Transmit(&huart1,(uint8_t *)str,10,HAL_MAX_DELAY);
 
-		HAL_UART_Transmit(&huart1,(uint8_t *)str,10,HAL_MAX_DELAY);
-
-		snprintf(command,sizeof(command),"AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"%s\"\r\n",str);
-
-		//uart_send_string("AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"06A0CFF000011000\"\r\n");
-		uart_send_string(command);
-
-
-
+		int len = snprintf(command, sizeof(command),"AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"%s\"\r\n",str);
+		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) command, len);
 		HAL_Delay(60000);
 
-
 		acc_integration_sleep_until_periodic_wakeup();
+
+
 	}
 
-	cleanup(distance_handle, distance_config, sensor, buffer, detector_cal_result_static);
+
+	cleanup(a121Sensor.distance_handle, a121Sensor.distance_config, a121Sensor.sensor, a121Sensor.buffer, a121Sensor.detector_cal_result_static);
 
 	printf("Application finished OK\n");
 
 	return EXIT_SUCCESS;
 }
 
+
+
+
+
 static void cleanup(acc_detector_distance_handle_t *distance_handle,
                     acc_detector_distance_config_t *distance_config,
                     acc_sensor_t                   *sensor,
                     void                           *buffer,
-                    uint8_t                        *detector_cal_result_static)
-{
+                    uint8_t                        *detector_cal_result_static){
 	acc_hal_integration_sensor_disable(SENSOR_ID);
 	acc_hal_integration_sensor_supply_off(SENSOR_ID);
 
-	if (distance_config != NULL)
-	{
+	if (distance_config != NULL){
 		acc_detector_distance_config_destroy(distance_config);
 	}
 
-	if (distance_handle != NULL)
-	{
+	if (distance_handle != NULL){
 		acc_detector_distance_destroy(distance_handle);
 	}
 
-	if (sensor != NULL)
-	{
+	if (sensor != NULL){
 		acc_sensor_destroy(sensor);
 	}
 
-	if (buffer != NULL)
-	{
+	if (buffer != NULL){
 		acc_integration_mem_free(buffer);
 	}
 
-	if (detector_cal_result_static != NULL)
-	{
+	if (detector_cal_result_static != NULL){
 		acc_integration_mem_free(detector_cal_result_static);
 	}
 }
 
-static void set_config(acc_detector_distance_config_t *detector_config, distance_preset_config_t preset)
-{
+static void set_config(acc_detector_distance_config_t *detector_config, distance_preset_config_t preset){
 	// Add configuration of the detector here
 	switch (preset){
 		case DISTANCE_PRESET_CONFIG_NONE:
@@ -365,59 +444,58 @@ static void set_config(acc_detector_distance_config_t *detector_config, distance
 }
 
 
-void led_pattern_success(void){
+void fsm_state_measure(void){
+	static uint8_t retryTimes;
 
-    HAL_Delay(2000);
-}
+	if(a121_measure(&a121Sensor, &result)){
 
-void led_pattern_fail(void){
+	}else{
 
-    HAL_Delay(500);
+	}
 }
 
 uint8_t nrf9151_setup(void){
 
-  uart_send_string("AT\r\n");
-  HAL_Delay(1000);
+	ring_buffer_flush_buffer();
 
-  uart_send_string("AT+CMEE=1\r\n");
-  HAL_Delay(1000);
+	uint8_t Command1 [] ="AT\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command1,sizeof(Command1) - 1);
 
-  uart_send_string("AT+CFUN=0\r\n");
-  HAL_Delay(1000);
+	if(uart_wait_for_string((const uint8_t *)"OK\r\n",1000)){
+		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+		HAL_Delay(1000);
+		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+	}else{
+		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+		HAL_Delay(1000);
+		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+	}
 
-  uart_send_string("AT+CEREG=5\r\n");
-  HAL_Delay(1000);
 
-  uart_send_string("AT+CGDCONT=0,\"IP\",\"kiteiot.vivo.com.br\"\r\n");
-  HAL_Delay(1000);
+	uint8_t Command2 [] ="AT+CMEE=1\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command2,sizeof(Command2) - 1);
+	HAL_Delay(1000);
 
-  uart_send_string("AT+CGAUTH=0,1,\"vivo\",\"vivo\"\r\n");
-  HAL_Delay(1000);
-  return 0x00;
+	uint8_t Command3 [] ="AT+CFUN=0\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command3,sizeof(Command3) - 1);
+	HAL_Delay(1000);
+
+	uint8_t Command4 [] ="AT+CEREG=5\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command4,sizeof(Command4) - 1);
+	HAL_Delay(1000);
+
+	uint8_t Command5 [] ="AT+CGDCONT=0,\"IP\",\"kiteiot.vivo.com.br\"\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command5,sizeof(Command5) - 1);
+	HAL_Delay(1000);
+
+	uint8_t Command6 [] ="AT+CGAUTH=0,1,\"vivo\",\"vivo\"\r\n";
+	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command6,sizeof(Command6) - 1);
+	HAL_Delay(1000);
+
+	return 0x00;
 
 }
 
-bool nrf9151_connect_to_network(void){
-	uint8_t attempts = 0;
-
-	do{
-		uart_send_string("AT+CFUN=1\r\n");
-
-		uint32_t startTime = HAL_GetTick();
-
-		while(((HAL_GetTick() - startTime) < 60000)){
-			if(uart_wait_for_line("CEREG: 1",1000) == 0x00){
-				return true;
-			}
-		}
-
-		attempts++;
-		acc_integration_sleep_ms(1000);
-	}while(attempts < 3);
-
-	return false;
-}
 
 float calculate_result(acc_detector_distance_result_t *result){
 	float smallerDistance;
@@ -430,6 +508,7 @@ float calculate_result(acc_detector_distance_result_t *result){
 
 	return (smallerDistance*1000.0);
 }
+
 void u64_to_str(uint64_t val, char *buf) {
     char temporary[21];
     int i = 0;
@@ -444,4 +523,8 @@ void u64_to_str(uint64_t val, char *buf) {
     while (i--) buf[j++] = temporary[i];
     buf[j] = '\0';
 }
+
+
+
+
 
