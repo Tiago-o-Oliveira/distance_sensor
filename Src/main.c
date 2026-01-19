@@ -127,23 +127,23 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-	//HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
+	HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
 	HAL_Delay(1000);
 
 	HAL_GPIO_TogglePin(LEDG_GPIO_Port, LEDG_Pin);
 	HAL_Delay(1000);
-	//HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
+	HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
 	HAL_Delay(1000);
 	HAL_GPIO_TogglePin(LEDB_GPIO_Port, LEDB_Pin);
 	HAL_Delay(1000);
 	HAL_GPIO_TogglePin(LEDG_GPIO_Port, LEDG_Pin);
 	HAL_Delay(1000);
-	//HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
+	HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
 	HAL_Delay(1000);
 	HAL_GPIO_TogglePin(LEDG_GPIO_Port, LEDG_Pin);
 	HAL_Delay(1000);
 	HAL_GPIO_TogglePin(LEDG_GPIO_Port, LEDG_Pin);
-	//HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
+	HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
 	HAL_GPIO_TogglePin(LEDB_GPIO_Port, LEDB_Pin);
 
   //uart_start_ring_buffer();
@@ -558,13 +558,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, WAKE_UP_Pin|LEDR_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, LEDG_Pin|LEDB_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, ENABLE_Pin|SPI_SS_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LEDR_GPIO_Port, LEDR_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : INTERRUPT_Pin */
   GPIO_InitStruct.Pin = INTERRUPT_Pin;
@@ -580,8 +580,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : WAKE_UP_Pin */
   GPIO_InitStruct.Pin = WAKE_UP_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(WAKE_UP_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : USR_BTN_Pin */
@@ -607,7 +608,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : MCU_INT_Pin */
   GPIO_InitStruct.Pin = MCU_INT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(MCU_INT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LEDR_Pin */
@@ -620,9 +621,6 @@ static void MX_GPIO_Init(void)
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

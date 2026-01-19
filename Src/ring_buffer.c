@@ -177,7 +177,6 @@ repeat2:
 
 void Uart_flush (void)
 {
-	memset(_rx_buffer->buffer,'\0', UART_BUFFER_SIZE_BYTES);
 	_rx_buffer->head = 0;
 	_rx_buffer->tail = 0;
 }
@@ -438,11 +437,11 @@ uint8_t uart_wait_for_string(const uint8_t *stringToWait, uint16_t timeout_ms){
                 return true;
             }
         }
-
+        /*
         if (isBufferOverfloded) {
             return false;
         }
-
+*/
         if ((HAL_GetTick() - start) >= timeout_ms) {
             return false;
         }
@@ -472,6 +471,7 @@ void ring_buffer_uart_isr(UART_HandleTypeDef *huart){
 }
 
 void ring_buffer_flush_buffer(void){
+	memset(_rx_buffer->buffer,'\0', UART_BUFFER_SIZE_BYTES);
 	_rx_buffer->head = 0;
 	_rx_buffer->tail = 0;
 }

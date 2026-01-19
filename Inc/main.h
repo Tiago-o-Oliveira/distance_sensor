@@ -65,7 +65,6 @@ void Error_Handler(void);
 #define MISC_GPIO2_GPIO_Port GPIOH
 #define WAKE_UP_Pin GPIO_PIN_11
 #define WAKE_UP_GPIO_Port GPIOA
-#define WAKE_UP_EXTI_IRQn EXTI15_10_IRQn
 #define DEBUG_UART_RX_Pin GPIO_PIN_10
 #define DEBUG_UART_RX_GPIO_Port GPIOA
 #define USR_BTN_Pin GPIO_PIN_8

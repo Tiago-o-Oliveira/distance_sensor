@@ -14,6 +14,7 @@
 #include "acc_sensor.h"
 #include "acc_version.h"
 
+
 #include "ring_buffer.h"
 /** \example example_detector_distance_low_power_off.c
  * @brief This is an example on how to disable the sensor and put the system in a low power state between measurements
@@ -70,12 +71,22 @@ typedef enum{
 	STATE_TEST_MODEM,
 } sensor_states_t;
 
+typedef enum{
+	COLOR_BLACK = 0x00,
+	COLOR_RED,
+	COLOR_YELLOW,
+	COLOR_GREEN,
+	COLOR_CYAN,
+	COLOR_BLUE,
+	COLOR_PURPLE,
+	COLOR_WHITE,
+}led_color_t;
 /** Definitions **/
 #define SENSOR_ID           (1U)
 #define SENSOR_TIMEOUT_MS   (1000U)
 #define DEFAULT_UPDATE_RATE (1.0f)
 #define FIRMWARE_VERSION 0x01
-
+#define STATE_RETRY_TIMES 0x03
 /** Globals **/
 extern UART_HandleTypeDef huart2;
 static uint8_t state = STATE_MEASURE;
@@ -89,12 +100,29 @@ static void cleanup(acc_detector_distance_handle_t *distance_handle,
 static void set_config(acc_detector_distance_config_t *detector_config, distance_preset_config_t preset);
 int acconeer_main(int argc, char *argv[]);
 
-uint8_t nrf9151_setup(void);
 float calculate_result(acc_detector_distance_result_t *result);
 void u64_to_str(uint64_t val, char *buf);
 
 static uint8_t a121_config_and_calibrate(a121_sensor_t *a121Sensor);
 static uint8_t a121_measure(a121_sensor_t *a121Sensor,acc_detector_distance_result_t *result);
+
+uint8_t nrf9151_setup_connection(void);
+static void nrf9151_toggle_power(void);
+
+void static fsm_state_measure(a121_sensor_t *a121Sensor, acc_detector_distance_result_t *result);
+void static fsm_state_test_at(void);
+void static fsm_state_config_connection(void);
+void static fsm_state_connect(void);
+void static fsm_state_mqtt_connect(void);
+void static fsm_state_send_data(const char *data);
+void static fsm_state_receive_config(void);
+void static fsm_state_turn_off(void);
+void static fsm_state_test_radar(void);
+void static fsm_state_test_modem(void);
+
+
+void led_set_color(led_color_t color);
+
 /** Functions **/
 
 
@@ -125,7 +153,7 @@ static uint8_t a121_config_and_calibrate(a121_sensor_t *a121Sensor){
 
 	set_config(a121Sensor->distance_config, DISTANCE_PRESET_CONFIG_BALANCED);
 
-	uint32_t sleep_time_ms = (uint32_t)(300000.0f / DEFAULT_UPDATE_RATE);
+	uint32_t sleep_time_ms = (uint32_t)(120000.0f / DEFAULT_UPDATE_RATE);
 
 	acc_integration_set_periodic_wakeup(sleep_time_ms);
 
@@ -298,7 +326,8 @@ int acconeer_main(int argc, char *argv[]){
 
 	a121_sensor_t a121Sensor;
 	acc_detector_distance_result_t result;
-
+	char str[30];
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
 
 	if (a121_config_and_calibrate(&a121Sensor) != EXIT_SUCCESS){
 		return EXIT_FAILURE;
@@ -306,63 +335,68 @@ int acconeer_main(int argc, char *argv[]){
 
 	while (true){
 
+
+
 		switch (state){
 			case STATE_MEASURE:
 
+				uart_start_ring_buffer();
+
+				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
+				HAL_Delay(500);
+				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+
+				uart_wait_for_string((const uint8_t*) "Ready", 60000);
+
+				fsm_state_measure(&a121Sensor,&result);
+
+				uint16_t distance_result = (uint16_t) calculate_result(&result);
+
+				uint64_t data = (0x06A0000300010000 | distance_result);
+				data |= ((uint64_t) (result.temperature & 0xFF)) << 40;
+
+				u64_to_str(data, str);
+
+				led_set_color(COLOR_RED);
+
 				break;
 			case STATE_TEST_AT:
+				fsm_state_test_at();
+				led_set_color(COLOR_YELLOW);
+
+				break;
+			case STATE_SETUP_CONNECTION:
+				fsm_state_config_connection();
+				led_set_color(COLOR_GREEN);
+
+				break;
+			case STATE_CONNECT:
+				fsm_state_connect();
+				led_set_color(COLOR_CYAN);
+
+				break;
+			case STATE_MQTT_CONNECT:
+				fsm_state_mqtt_connect();
+				led_set_color(COLOR_BLUE);
+
+				break;
+			case STATE_SEND_DATA:
+				fsm_state_send_data(str);
+				led_set_color(COLOR_PURPLE);
+
+				break;
+			case STATE_RECEIVE_CONFIG:
+				fsm_state_receive_config();
+				led_set_color(COLOR_WHITE);
+
+				break;
+			case STATE_TURN_OFF:
+				led_set_color(COLOR_BLACK);
+				fsm_state_turn_off();
 
 				break;
 
 		}
-
-
-
-
-
-
-
-
-
-		char str[30];
-		char command[256];
-
-		nrf9151_setup();
-
-
-		ring_buffer_flush_buffer();
-		uint8_t Command[] = "AT%XVBAT";
-				HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,
-						sizeof(Command) - 1);
-				HAL_Delay(1000);
-				uart_wait_for_string((const uint8_t *)"%XVBAT:",1000);
-
-
-		uint8_t Command1[] = "AT+CFUN=1\r\n";
-		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command1,
-				sizeof(Command1) - 1);
-		HAL_Delay(60000);
-		//while (!(uart_wait_for_line("CEREG: 1",60000)));
-
-		uint8_t Command2[] = "AT#XMQTTCON=1,\"ecomfort-gateway\",\"ecomfort*2018\",\"devmqtt.ecomfort.com.br\",1883\r\n";
-		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command2,
-				sizeof(Command2) - 1);
-		HAL_Delay(60000);
-
-		uint16_t distance_result = (uint16_t) calculate_result(&result);
-
-		uint64_t data = (0x06A0000300010000 | distance_result);
-		data |= ((uint64_t) (result.temperature & 0xFF)) << 40;
-
-		u64_to_str(data, str);
-
-		//HAL_UART_Transmit(&huart1,(uint8_t *)str,10,HAL_MAX_DELAY);
-
-		int len = snprintf(command, sizeof(command),"AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"%s\"\r\n",str);
-		HAL_UART_Transmit_DMA(&huart2, (uint8_t*) command, len);
-		HAL_Delay(60000);
-
-		acc_integration_sleep_until_periodic_wakeup();
 
 
 	}
@@ -377,7 +411,62 @@ int acconeer_main(int argc, char *argv[]){
 
 
 
+void led_set_color(led_color_t color){
+	switch(color){
+	case COLOR_BLACK:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);//Blue
+		break;
 
+	case COLOR_RED:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);//Blue
+		break;
+
+	case COLOR_YELLOW:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);//Blue
+		break;
+
+	case COLOR_GREEN:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);//Blue
+		break;
+
+	case COLOR_CYAN:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);//Blue
+		break;
+
+	case COLOR_BLUE:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);//Blue
+		break;
+
+	case COLOR_PURPLE:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);//Blue
+		break;
+
+	case COLOR_WHITE:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);//Blue
+		break;
+	default:
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);//Red
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);//Green
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);//Blue
+		break;
+	}
+}
 
 static void cleanup(acc_detector_distance_handle_t *distance_handle,
                     acc_detector_distance_config_t *distance_config,
@@ -444,51 +533,174 @@ static void set_config(acc_detector_distance_config_t *detector_config, distance
 }
 
 
-void fsm_state_measure(void){
+void static fsm_state_measure(a121_sensor_t *a121Sensor, acc_detector_distance_result_t *result){
 	static uint8_t retryTimes;
 
-	if(a121_measure(&a121Sensor, &result)){
+	if(a121_measure(a121Sensor, result)){
+		retryTimes++;
 
-	}else{
+		if(retryTimes >= STATE_RETRY_TIMES){
+			state = STATE_TURN_OFF;
+		}else{
+			state = STATE_MEASURE;
+		}
 
-	}
+		}else{
+			state = STATE_TEST_AT;
+		}
 }
 
-uint8_t nrf9151_setup(void){
+void static fsm_state_test_at(void){
+	const uint8_t Command [] ="AT\r\n";
+	static uint8_t retryTimes;
 
 	ring_buffer_flush_buffer();
 
-	uint8_t Command1 [] ="AT\r\n";
-	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command1,sizeof(Command1) - 1);
+	HAL_UART_Transmit_IT(&huart2,(uint8_t *)Command,sizeof(Command) - 1);
+	HAL_Delay(100);
 
-	if(uart_wait_for_string((const uint8_t *)"OK\r\n",1000)){
-		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
-		HAL_Delay(1000);
-		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+	if(uart_wait_for_string((const uint8_t*) "OK\r\n", 1000)){
+		state = STATE_SETUP_CONNECTION;
 	}else{
-		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
-		HAL_Delay(1000);
-		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+		retryTimes++;
+		if(retryTimes >= STATE_RETRY_TIMES){
+			state = STATE_TURN_OFF;
+		}else{
+			state = STATE_TEST_AT;
+		}
 	}
 
+}
 
-	uint8_t Command2 [] ="AT+CMEE=1\r\n";
+void static fsm_state_config_connection(void){
+	static uint8_t retryTimes;
+
+	if(nrf9151_setup_connection()){
+		retryTimes++;
+		if(retryTimes >= STATE_RETRY_TIMES){
+			state = STATE_TURN_OFF;
+		}else{
+			state = STATE_SETUP_CONNECTION;
+		}
+
+	}else{
+		state = STATE_CONNECT;
+	}
+}
+
+void static fsm_state_connect(void){
+	const uint8_t Command[] = "AT+CFUN=1\r\n";
+	static uint8_t retryTimes;
+
+	ring_buffer_flush_buffer();
+	HAL_UART_Transmit_IT(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
+	HAL_Delay(50);
+
+	if(uart_wait_for_string((const uint8_t*) "CEREG: 1", 60000)){
+			state = STATE_MQTT_CONNECT;
+	}else{
+		retryTimes++;
+		if(retryTimes >= STATE_RETRY_TIMES){
+			state = STATE_TURN_OFF;
+		}else{
+			state = STATE_CONNECT;
+		}
+	}
+
+}
+
+void static fsm_state_mqtt_connect(void){
+	uint8_t Command[] = "AT#XMQTTCON=1,\"ecomfort-gateway\",\"ecomfort*2018\",\"devmqtt.ecomfort.com.br\",1883\r\n";
+	static uint8_t retryTimes;
+
+	ring_buffer_flush_buffer();
+	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
+
+	HAL_Delay(100);
+
+	if (uart_wait_for_string((const uint8_t*) "#XMQTTEVT: 0,0", 60000)) {
+		state = STATE_SEND_DATA;
+	} else {
+		retryTimes++;
+		if (retryTimes >= STATE_RETRY_TIMES) {
+			state = STATE_TURN_OFF;
+		} else {
+			state = STATE_MQTT_CONNECT;
+		}
+	}
+}
+
+void static fsm_state_send_data(const char *data){
+	char command[256];
+	static uint8_t retryTimes;
+	int len = snprintf(command, sizeof(command),"AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"%s\"\r\n",data);
+
+	ring_buffer_flush_buffer();
+	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) command, len);
+
+	HAL_Delay(200);
+
+	if (uart_wait_for_string((const uint8_t*) "OK\r\n", 1000)) {
+		state = STATE_RECEIVE_CONFIG;
+	} else {
+		retryTimes++;
+		if (retryTimes >= STATE_RETRY_TIMES) {
+			state = STATE_TURN_OFF;
+		} else {
+			state = STATE_SEND_DATA;
+		}
+	}
+}
+
+void static fsm_state_receive_config(void){
+	state = STATE_TURN_OFF;
+}
+
+void static fsm_state_turn_off(void){
+	const uint8_t Command[] = "AT+CFUN=0\r\n";
+
+	ring_buffer_flush_buffer();
+	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
+	uart_wait_for_string((const uint8_t*) "OK\r\n", 3000);
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
+	HAL_Delay(500);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+
+	ring_buffer_flush_buffer();
+	acc_integration_sleep_until_periodic_wakeup();
+	HAL_Delay(500);
+	state = STATE_MEASURE;
+
+}
+
+void static fsm_state_test_radar(void){
+	//heyo buddy
+}
+
+void static fsm_state_test_modem(void){
+
+}
+
+uint8_t nrf9151_setup_connection(void){
+
+	const uint8_t Command2 [] ="AT+CMEE=1\r\n";
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command2,sizeof(Command2) - 1);
 	HAL_Delay(1000);
 
-	uint8_t Command3 [] ="AT+CFUN=0\r\n";
+	const uint8_t Command3 [] ="AT+CFUN=0\r\n";
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command3,sizeof(Command3) - 1);
 	HAL_Delay(1000);
 
-	uint8_t Command4 [] ="AT+CEREG=5\r\n";
+	const uint8_t Command4 [] ="AT+CEREG=5\r\n";
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command4,sizeof(Command4) - 1);
 	HAL_Delay(1000);
 
-	uint8_t Command5 [] ="AT+CGDCONT=0,\"IP\",\"kiteiot.vivo.com.br\"\r\n";
+	const uint8_t Command5 [] ="AT+CGDCONT=0,\"IP\",\"kiteiot.vivo.com.br\"\r\n";
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command5,sizeof(Command5) - 1);
 	HAL_Delay(1000);
 
-	uint8_t Command6 [] ="AT+CGAUTH=0,1,\"vivo\",\"vivo\"\r\n";
+	const uint8_t Command6 [] ="AT+CGAUTH=0,1,\"vivo\",\"vivo\"\r\n";
 	HAL_UART_Transmit_DMA(&huart2,(uint8_t *)Command6,sizeof(Command6) - 1);
 	HAL_Delay(1000);
 
@@ -496,7 +708,11 @@ uint8_t nrf9151_setup(void){
 
 }
 
-
+static void nrf9151_toggle_power(void){
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
+	HAL_Delay(1000);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+}
 float calculate_result(acc_detector_distance_result_t *result){
 	float smallerDistance;
 
