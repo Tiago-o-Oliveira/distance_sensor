@@ -100,6 +100,7 @@ static void cleanup(acc_detector_distance_handle_t *distance_handle,
 static void set_config(acc_detector_distance_config_t *detector_config, distance_preset_config_t preset);
 int acconeer_main(int argc, char *argv[]);
 
+float calculate_strength(acc_detector_distance_result_t *result);
 float calculate_result(acc_detector_distance_result_t *result);
 void u64_to_str(uint64_t val, char *buf);
 
@@ -153,7 +154,7 @@ static uint8_t a121_config_and_calibrate(a121_sensor_t *a121Sensor){
 
 	set_config(a121Sensor->distance_config, DISTANCE_PRESET_CONFIG_BALANCED);
 
-	uint32_t sleep_time_ms = (uint32_t)(120000.0f / DEFAULT_UPDATE_RATE);
+	uint32_t sleep_time_ms = (uint32_t)(500.0f / DEFAULT_UPDATE_RATE);
 
 	acc_integration_set_periodic_wakeup(sleep_time_ms);
 
@@ -342,18 +343,23 @@ int acconeer_main(int argc, char *argv[]){
 
 				uart_start_ring_buffer();
 
-				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-				HAL_Delay(500);
-				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
-
-				uart_wait_for_string((const uint8_t*) "Ready", 60000);
 
 				fsm_state_measure(&a121Sensor,&result);
 
-				uint16_t distance_result = (uint16_t) calculate_result(&result);
+				float a = calculate_strength(&result);  // <-- scale up
 
-				uint64_t data = (0x06A0000300010000 | distance_result);
-				data |= ((uint64_t) (result.temperature & 0xFF)) << 40;
+				uint16_t amp_u16 = (uint16_t)(a + 0.5f);   // <-- round
+				uint64_t data = 0x06A0000300000000ULL;
+
+				uint32_t d = (uint32_t)calculate_result(&result);
+				if (d > 65535u) d = 65535u;
+				uint16_t dist_u16 = (uint16_t)d;
+
+				data |= (uint64_t)dist_u16;                // bits 15..0
+				data |= ((uint64_t)amp_u16) << 16;         // bits 31..16
+
+
+
 
 				u64_to_str(data, str);
 
@@ -505,28 +511,28 @@ static void set_config(acc_detector_distance_config_t *detector_config, distance
 			break;
 
 		case DISTANCE_PRESET_CONFIG_BALANCED:
-			acc_detector_distance_config_start_set(detector_config, 0.25f);
-			acc_detector_distance_config_end_set(detector_config, 3.0f);
-			acc_detector_distance_config_max_step_length_set(detector_config, 0U);
-			acc_detector_distance_config_max_profile_set(detector_config, ACC_CONFIG_PROFILE_5);
-			acc_detector_distance_config_reflector_shape_set(detector_config, ACC_DETECTOR_DISTANCE_REFLECTOR_SHAPE_GENERIC);
-			acc_detector_distance_config_peak_sorting_set(detector_config, ACC_DETECTOR_DISTANCE_PEAK_SORTING_STRONGEST);
-			acc_detector_distance_config_threshold_method_set(detector_config, ACC_DETECTOR_DISTANCE_THRESHOLD_METHOD_CFAR);
-			acc_detector_distance_config_threshold_sensitivity_set(detector_config, 0.5f);
-			acc_detector_distance_config_signal_quality_set(detector_config, 15.0f);
-			acc_detector_distance_config_close_range_leakage_cancellation_set(detector_config, false);
-			break;
-
-		case DISTANCE_PRESET_CONFIG_HIGH_ACCURACY:
-			acc_detector_distance_config_start_set(detector_config, 0.25f);
-			acc_detector_distance_config_end_set(detector_config, 3.0f);
-			acc_detector_distance_config_max_step_length_set(detector_config, 2U);
+			acc_detector_distance_config_start_set(detector_config, 0.1f);
+			acc_detector_distance_config_end_set(detector_config, 1.0f);
+			acc_detector_distance_config_max_step_length_set(detector_config, 1U);
 			acc_detector_distance_config_max_profile_set(detector_config, ACC_CONFIG_PROFILE_3);
 			acc_detector_distance_config_reflector_shape_set(detector_config, ACC_DETECTOR_DISTANCE_REFLECTOR_SHAPE_GENERIC);
 			acc_detector_distance_config_peak_sorting_set(detector_config, ACC_DETECTOR_DISTANCE_PEAK_SORTING_STRONGEST);
 			acc_detector_distance_config_threshold_method_set(detector_config, ACC_DETECTOR_DISTANCE_THRESHOLD_METHOD_CFAR);
-			acc_detector_distance_config_threshold_sensitivity_set(detector_config, 0.5f);
-			acc_detector_distance_config_signal_quality_set(detector_config, 20.0f);
+			acc_detector_distance_config_threshold_sensitivity_set(detector_config, 0.7f);
+			acc_detector_distance_config_signal_quality_set(detector_config, 17.0f);
+			acc_detector_distance_config_close_range_leakage_cancellation_set(detector_config, false);
+			break;
+
+		case DISTANCE_PRESET_CONFIG_HIGH_ACCURACY:
+			acc_detector_distance_config_start_set(detector_config, 0.1f);
+			acc_detector_distance_config_end_set(detector_config, 1.0f);
+			acc_detector_distance_config_max_step_length_set(detector_config, 1U);
+			acc_detector_distance_config_max_profile_set(detector_config, ACC_CONFIG_PROFILE_3);
+			acc_detector_distance_config_reflector_shape_set(detector_config, ACC_DETECTOR_DISTANCE_REFLECTOR_SHAPE_GENERIC);
+			acc_detector_distance_config_peak_sorting_set(detector_config, ACC_DETECTOR_DISTANCE_PEAK_SORTING_STRONGEST);
+			acc_detector_distance_config_threshold_method_set(detector_config, ACC_DETECTOR_DISTANCE_THRESHOLD_METHOD_CFAR);
+			acc_detector_distance_config_threshold_sensitivity_set(detector_config, 0.7f);
+			acc_detector_distance_config_signal_quality_set(detector_config, 17.0f);
 			acc_detector_distance_config_close_range_leakage_cancellation_set(detector_config, false);
 			break;
 	}
@@ -536,18 +542,9 @@ static void set_config(acc_detector_distance_config_t *detector_config, distance
 void static fsm_state_measure(a121_sensor_t *a121Sensor, acc_detector_distance_result_t *result){
 	static uint8_t retryTimes;
 
-	if(a121_measure(a121Sensor, result)){
-		retryTimes++;
+	a121_measure(a121Sensor, result);
 
-		if(retryTimes >= STATE_RETRY_TIMES){
-			state = STATE_TURN_OFF;
-		}else{
-			state = STATE_MEASURE;
-		}
-
-		}else{
-			state = STATE_TEST_AT;
-		}
+	state = STATE_TEST_AT;
 }
 
 void static fsm_state_test_at(void){
@@ -556,100 +553,46 @@ void static fsm_state_test_at(void){
 
 	ring_buffer_flush_buffer();
 
-	HAL_UART_Transmit_IT(&huart2,(uint8_t *)Command,sizeof(Command) - 1);
-	HAL_Delay(100);
 
-	if(uart_wait_for_string((const uint8_t*) "OK\r\n", 1000)){
 		state = STATE_SETUP_CONNECTION;
-	}else{
-		retryTimes++;
-		if(retryTimes >= STATE_RETRY_TIMES){
-			state = STATE_TURN_OFF;
-		}else{
-			state = STATE_TEST_AT;
-		}
-	}
+
 
 }
 
 void static fsm_state_config_connection(void){
-	static uint8_t retryTimes;
 
-	if(nrf9151_setup_connection()){
-		retryTimes++;
-		if(retryTimes >= STATE_RETRY_TIMES){
-			state = STATE_TURN_OFF;
-		}else{
-			state = STATE_SETUP_CONNECTION;
-		}
-
-	}else{
 		state = STATE_CONNECT;
-	}
 }
 
 void static fsm_state_connect(void){
-	const uint8_t Command[] = "AT+CFUN=1\r\n";
-	static uint8_t retryTimes;
 
-	ring_buffer_flush_buffer();
-	HAL_UART_Transmit_IT(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
-	HAL_Delay(50);
-
-	if(uart_wait_for_string((const uint8_t*) "CEREG: 1", 60000)){
 			state = STATE_MQTT_CONNECT;
-	}else{
-		retryTimes++;
-		if(retryTimes >= STATE_RETRY_TIMES){
-			state = STATE_TURN_OFF;
-		}else{
-			state = STATE_CONNECT;
-		}
-	}
+
 
 }
 
 void static fsm_state_mqtt_connect(void){
-	uint8_t Command[] = "AT#XMQTTCON=1,\"ecomfort-gateway\",\"ecomfort*2018\",\"devmqtt.ecomfort.com.br\",1883\r\n";
-	static uint8_t retryTimes;
 
-	ring_buffer_flush_buffer();
-	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
-
-	HAL_Delay(100);
-
-	if (uart_wait_for_string((const uint8_t*) "#XMQTTEVT: 0,0", 60000)) {
 		state = STATE_SEND_DATA;
-	} else {
-		retryTimes++;
-		if (retryTimes >= STATE_RETRY_TIMES) {
-			state = STATE_TURN_OFF;
-		} else {
-			state = STATE_MQTT_CONNECT;
-		}
-	}
+
 }
 
 void static fsm_state_send_data(const char *data){
 	char command[256];
 	static uint8_t retryTimes;
-	int len = snprintf(command, sizeof(command),"AT#XMQTTPUB=\"ecomfort/iot/v1/s2g/gateway/LTE25082800003/device/0x000d6f000ca67637/event\",\"%s\"\r\n",data);
+
+	HAL_UART_Transmit(&huart2, (uint8_t*) "data:", 4,HAL_MAX_DELAY);
+	int len = snprintf(command, sizeof(command),"%s\r\n",data);
 
 	ring_buffer_flush_buffer();
 	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) command, len);
 
 	HAL_Delay(200);
 
-	if (uart_wait_for_string((const uint8_t*) "OK\r\n", 1000)) {
+
 		state = STATE_RECEIVE_CONFIG;
-	} else {
-		retryTimes++;
-		if (retryTimes >= STATE_RETRY_TIMES) {
-			state = STATE_TURN_OFF;
-		} else {
-			state = STATE_SEND_DATA;
-		}
-	}
+
+
 }
 
 void static fsm_state_receive_config(void){
@@ -658,14 +601,6 @@ void static fsm_state_receive_config(void){
 
 void static fsm_state_turn_off(void){
 	const uint8_t Command[] = "AT+CFUN=0\r\n";
-
-	ring_buffer_flush_buffer();
-	HAL_UART_Transmit_DMA(&huart2, (uint8_t*) Command,sizeof(Command) - 1);
-	uart_wait_for_string((const uint8_t*) "OK\r\n", 3000);
-
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-	HAL_Delay(500);
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
 
 	ring_buffer_flush_buffer();
 	acc_integration_sleep_until_periodic_wakeup();
@@ -713,6 +648,25 @@ static void nrf9151_toggle_power(void){
 	HAL_Delay(1000);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
 }
+
+
+float calculate_strength(acc_detector_distance_result_t *result){
+	float strongerStrength;
+	if (result->num_distances > 0){
+		strongerStrength = 0;
+		for(uint8_t i = 0; i < result->num_distances; i++){
+			if(result->strengths[i] > strongerStrength){
+				strongerStrength = result->strengths[i];
+			}
+		}
+	}else{
+		strongerStrength = 0;
+	}
+
+	return (strongerStrength*10000.0);
+}
+
+
 float calculate_result(acc_detector_distance_result_t *result){
 	float smallerDistance;
 
